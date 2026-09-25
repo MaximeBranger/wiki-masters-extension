@@ -2,7 +2,7 @@ const DEFAULTS = {
   enabled: true, selector: "", keywords: "ouvrir,open,claim,récupérer",
   minDelay: 800, maxDelay: 2000, reloadMinutes: 0, opened: 0,
   autoReveal: true, nextButton: "", revealMinDelay: 500, revealMaxDelay: 1100,
-  autoContinue: true, continueButton: "", showSummary: true, rarityZone: "",
+  autoContinue: true, continueButton: "", showSummary: true, rarityZone: "", testHumanCheck: false,
   collectionPath: "/collection", cardPattern: "/cards?/([^/?#]+)", markLinks: true, affordableOnly: false, budget: 0, balanceSelector: 'button[aria-label="Ouvrir la boutique WikiBidous"]',
   pullZone: "", pullWindow: 15, owned: [], counts: {}, readCollectionQty: true,
   dryRun: true, autoSellDupes: false, priceMultiplier: 1, minPrice: 1,
@@ -13,7 +13,7 @@ const DEFAULTS = {
   expiredKeywords: "expirée,expiré,non vendue,expired", rowSelector: "", reclaimButton: "",
   sellQueue: [], sellLog: [], soldCount: 0
 };
-const CHECKS = ["enabled", "autoReveal", "autoContinue", "showSummary", "markLinks", "affordableOnly", "readCollectionQty", "dryRun", "autoSellDupes", "autoRelist"];
+const CHECKS = ["enabled", "autoReveal", "autoContinue", "showSummary", "testHumanCheck", "markLinks", "affordableOnly", "readCollectionQty", "dryRun", "autoSellDupes", "autoRelist"];
 const NUMS = ["minDelay", "maxDelay", "revealMinDelay", "revealMaxDelay", "reloadMinutes", "pullWindow", "priceMultiplier", "minPrice", "keepMin", "budget", "relistMinutes"];
 const TEXTS = ["selector", "keywords", "nextButton", "continueButton", "rarityZone", "collectionPath", "cardPattern", "pullZone", "balanceSelector", "avgPrice", "sellButton",
   "priceInput", "confirmButton", "qtySelector", "salesPath", "expiredKeywords", "rowSelector", "reclaimButton"];

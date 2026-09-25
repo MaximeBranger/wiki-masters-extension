@@ -14,6 +14,7 @@ const DEFAULTS = {
   continueButton: "",                    // sélecteur (vide = bouton dont le texte est "Continuer")
   showSummary: true,                     // encart récap en bas à droite sur /pulls
   rarityZone: "",                        // sélecteur de l'élément affichant rareté/vues (optionnel)
+  testHumanCheck: false,                 // TEST dev : valider la modale « Vérification rapide »
   opened: 0,
   rarityCounts: {},                      // { C, PC, R, SR, UR, L, "?" }
   lastPack: []
@@ -78,11 +79,12 @@ const rarityFromViews = v => RARITY_TIERS.reduce((r, t) => (v >= t.min ? t.k : r
 // "1 234 vues/mois", "< 50 vues/mois", "1 000+ vues / mois", "12,3k vues/mois" ou un badge "SR"
 function parseRarityText(text) {
   const t = (text || "").replace(/[\u00a0\u202f]/g, " ");
-  const m = t.match(/(<\s*)?(\d[\d .,]*)\s*(k)?\s*\+?\s*vues?\s*(?:\/|par)\s*mois/i);
+  const m = t.match(/(<\s*)?(\d[\d .,]*)\s*([km])?\s*\+?\s*vues?\s*(?:\/|par)\s*mois/i);
   if (m) {
     if (m[1]) return "C";
     const raw = m[2].trim().replace(/ /g, "");
-    const v = m[3] ? parseFloat(raw.replace(",", ".")) * 1000 : parseInt(raw.replace(/[.,]/g, ""), 10);
+    const mult = { k: 1e3, m: 1e6 }[(m[3] || "").toLowerCase()];
+    const v = mult ? parseFloat(raw.replace(",", ".")) * mult : parseInt(raw.replace(/[.,]/g, ""), 10);
     if (!isNaN(v)) return rarityFromViews(v);
   }
   const b = t.trim().toUpperCase();
@@ -143,9 +145,12 @@ function currentCardRarity() {
   const d = c => { const r = c.el.getBoundingClientRect(); return Math.hypot(r.left + r.width / 2 - innerWidth / 2, r.top + r.height / 2 - innerHeight / 2); };
   return cs.sort((a, b) => d(a) - d(b))[0].r;
 }
+// Attend que la rareté de la carte affichée soit lisible avant de poursuivre
+const RARITY_WAIT_MS = 10000;
 async function readCurrentRarity() {
-  const end = Date.now() + 1500;
-  while (Date.now() < end) { const r = currentCardRarity(); if (r) return r; await sleep(250); }
+  const end = Date.now() + RARITY_WAIT_MS;
+  while (Date.now() < end) { const r = currentCardRarity(); if (r) return r; await sleep(200); }
+  log(`Rareté illisible après ${RARITY_WAIT_MS / 1000} s, carte comptée « ? »`);
   return null;
 }
 
@@ -326,8 +331,49 @@ function findPackButtons() {
   return candidates.filter(el => isClickable(el) && isSafeToClick(el));
 }
 
+// ----- TEST dev : modale anti-robot « Vérification rapide » -----
+// Coche la case visible (jamais le champ piège caché "website") puis clique sur « Continuer ».
+function findHumanCheck() {
+  const title = [...document.querySelectorAll("p")]
+    .find(p => (p.textContent || "").trim().toLowerCase() === "vérification rapide");
+  const box = title?.parentElement;
+  if (!box) return null;
+  const checkbox = [...box.querySelectorAll("input[type=checkbox]")]
+    .find(i => !i.closest("[aria-hidden='true']") && isShown(i));
+  const button = [...box.querySelectorAll("button")]
+    .find(b => (b.innerText || b.textContent || "").trim().toLowerCase() === "continuer");
+  return checkbox && button ? { checkbox, button } : null;
+}
+
+let humanCheckLogged = false;
+async function passHumanCheck(hc) {
+  if (!cfg.testHumanCheck) {
+    if (!humanCheckLogged) log("Vérification anti-robot affichée : en attente de validation manuelle");
+    humanCheckLogged = true;
+    return;
+  }
+  humanCheckLogged = false;
+  log("[TEST] Vérification anti-robot détectée, validation…");
+  await sleep(rand(cfg.minDelay, cfg.maxDelay));
+  if (!hc.checkbox.checked) hc.checkbox.click();
+  const end = Date.now() + 5000;
+  while (Date.now() < end && hc.button.disabled) await sleep(100);
+  if (hc.button.disabled) { log("[TEST] « Continuer » reste désactivé après avoir coché la case"); return; }
+  await sleep(rand(cfg.revealMinDelay, cfg.revealMaxDelay));
+  hc.button.click();
+  log("[TEST] Vérification validée");
+  await sleep(1500);
+}
+
 async function tryOpen() {
   if (!cfg.enabled || busy || revealing || !onPullsPage()) return;
+  const hc = findHumanCheck();
+  if (hc) {
+    busy = true;
+    try { await passHumanCheck(hc); } finally { busy = false; }
+    return;
+  }
+  humanCheckLogged = false;
   const buttons = findPackButtons();
   if (!buttons.length) return;
 
