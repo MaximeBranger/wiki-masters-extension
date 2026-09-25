@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 13px system-ui, sans-serif; width: 310px; margin: 0; padding: 14px; background: #16131f; color: #eee; }
+  h1 { font-size: 15px; margin: 0 0 10px; }
+  details { border-top: 1px solid #3a3450; padding: 8px 0; }
+  summary { cursor: pointer; font-weight: 600; font-size: 13px; padding: 4px 0; }
+  label { display: block; margin: 9px 0 4px; color: #bbb; font-size: 12px; }
+  input[type=text], input[type=number] { width: 100%; box-sizing: border-box; padding: 6px 8px;
+    border: 1px solid #3a3450; border-radius: 6px; background: #221d30; color: #eee; }
+  .row { display: flex; gap: 8px; } .row > div { flex: 1; }
+  .toggle { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px;
+    background: #221d30; border-radius: 8px; margin-top: 6px; }
+  .warn { background: #3b2a0a; color: #fbbf24; }
+  .hint { font-size: 11px; color: #888; margin-top: 4px; }
+  button { margin-top: 10px; width: 100%; padding: 8px; border: 0; border-radius: 6px;
+    background: #8b5cf6; color: white; font-weight: 600; cursor: pointer; }
+  .group { margin: 12px 0 2px; font-weight: 600; font-size: 12px; color: #a78bfa; }
+  button.sec.back { margin: 0 0 10px; width: auto; padding: 5px 10px; }
+  button.sec { background: #2e2842; margin-top: 6px; font-weight: 500; }
+  .stats { margin-top: 10px; font-size: 12px; color: #aaa; text-align: center; line-height: 1.7; }
+  #log { margin-top: 8px; font: 11px/1.5 ui-monospace, monospace; background: #0f0c17; border-radius: 6px;
+    padding: 6px 8px; max-height: 360px; overflow-y: auto; white-space: pre-wrap; color: #ccc; }
+  a { color: #a78bfa; }
+</style>
+</head>
+<body>
+  <div id="main">
+    <h1>🎴 Auto Pack</h1>
+    <div class="group">📦 Packs</div>
+    <div class="toggle"><span>Ouverture automatique</span><input type="checkbox" id="enabled"></div>
+    <div class="toggle"><span>Faire défiler les cartes</span><input type="checkbox" id="autoReveal"></div>
+    <div class="toggle"><span>Cliquer sur « Continuer » à la fin</span><input type="checkbox" id="autoContinue"></div>
+    <div class="toggle"><span>Encart récap sur la page des packs</span><input type="checkbox" id="showSummary"></div>
+    <div class="group">📚 Collection</div>
+    <div class="toggle"><span>Pastilles sur les liens</span><input type="checkbox" id="markLinks"></div>
+    <div class="toggle"><span>Lire les quantités (x3) en collection</span><input type="checkbox" id="readCollectionQty"></div>
+    <div class="toggle"><span>Marketplace : masquer les offres trop chères</span><input type="checkbox" id="affordableOnly"></div>
+    <div class="group">💰 Vente</div>
+    <div class="toggle warn"><span>Mode simulation (ne valide pas)</span><input type="checkbox" id="dryRun"></div>
+    <div class="toggle"><span>Vendre les doublons tirés</span><input type="checkbox" id="autoSellDupes"></div>
+    <div class="toggle"><span>Remise en vente automatique</span><input type="checkbox" id="autoRelist"></div>
+    <button class="sec" id="openLogs">📜 Logs</button>
+    <button class="sec" id="openAdv">⚙ Configuration avancée</button>
+  </div>
+
+  <div id="adv" hidden>
+    <button class="sec back" id="closeAdv">← Retour</button>
+    <h1>⚙ Configuration avancée</h1>
+  <details open>
+    <summary>📦 Ouverture des packs</summary>
+    <label>Sélecteur CSS du bouton (optionnel, prioritaire)</label>
+    <input type="text" id="selector" placeholder="ex : button.open-pack">
+    <label>Mots-clés des boutons</label>
+    <input type="text" id="keywords">
+    <div class="row">
+      <div><label>Délai min (ms)</label><input type="number" id="minDelay" min="0"></div>
+      <div><label>Délai max (ms)</label><input type="number" id="maxDelay" min="0"></div>
+    </div>
+    <label>Recharger /pulls toutes les N min (0 = non)</label>
+    <input type="number" id="reloadMinutes" min="0">
+    <label>Bouton « carte suivante » (vide = flèche droite)</label>
+    <input type="text" id="nextButton" placeholder="détection automatique">
+    <div class="row">
+      <div><label>Défilement min (ms)</label><input type="number" id="revealMinDelay" min="100"></div>
+      <div><label>Défilement max (ms)</label><input type="number" id="revealMaxDelay" min="100"></div>
+    </div>
+    <label>Élément affichant la rareté / les vues (sélecteur, optionnel)</label>
+    <input type="text" id="rarityZone" placeholder="détection automatique">
+    <label>Bouton « Continuer » (vide = détection par le texte)</label>
+    <input type="text" id="continueButton" placeholder="détection automatique">
+  </details>
+
+  <details>
+    <summary>📚 Collection</summary>
+    <label>Chemin de la page collection</label>
+    <input type="text" id="collectionPath">
+    <label>Regex d'URL de carte (groupe 1 = id)</label>
+    <input type="text" id="cardPattern">
+    <label>Solde : sélecteur de l'élément affichant mes moyens</label>
+    <input type="text" id="balanceSelector" placeholder="détection automatique">
+    <label>Solde manuel (utilisé si le sélecteur est vide)</label>
+    <input type="number" id="budget" min="0">
+    <label>Zone des cartes tirées (sélecteur, optionnel)</label>
+    <input type="text" id="pullZone" placeholder="ex : .pack-results">
+    <label>Fenêtre de capture après ouverture (s)</label>
+    <input type="number" id="pullWindow" min="3">
+  </details>
+
+  <details>
+    <summary>💰 Vente</summary>
+    <div class="row">
+      <div><label>Prix = moyenne ×</label><input type="number" id="priceMultiplier" step="0.05" min="0.1"></div>
+      <div><label>Prix minimum</label><input type="number" id="minPrice" min="0"></div>
+    </div>
+    <label>Prix moyen (sélecteur ou texte:…)</label>
+    <input type="text" id="avgPrice">
+    <label>Bouton « Vendre »</label>
+    <input type="text" id="sellButton">
+    <label>Champ de prix</label>
+    <input type="text" id="priceInput">
+    <label>Bouton de confirmation</label>
+    <input type="text" id="confirmButton">
+    <div class="row">
+      <div><label>Quantité possédée (sél., opt.)</label><input type="text" id="qtySelector"></div>
+      <div><label>Toujours garder</label><input type="number" id="keepMin" min="0"></div>
+    </div>
+    <div class="hint">Chaque champ accepte un sélecteur CSS ou <code>texte:mot1,mot2</code>.</div>
+  </details>
+
+  <details>
+    <summary>🔁 Remise en vente des invendus</summary>
+    <label>Chemin de la page « mes ventes »</label>
+    <input type="text" id="salesPath">
+    <label>Vérifier toutes les N min (min. 5)</label>
+    <input type="number" id="relistMinutes" min="5">
+    <label>Textes indiquant une vente expirée</label>
+    <input type="text" id="expiredKeywords">
+    <label>Sélecteur d'une ligne de vente (optionnel)</label>
+    <input type="text" id="rowSelector">
+    <label>Bouton « récupérer » avant remise (optionnel)</label>
+    <input type="text" id="reclaimButton" placeholder="ex : texte:récupérer,retirer">
+    <button class="sec" id="relistNow">Vérifier maintenant</button>
+  </details>
+
+    <button id="save">Enregistrer</button>
+  </div>
+
+  <div class="stats" id="statsBox">
+    Packs ouverts : <b id="opened">0</b> · <a href="#" id="resetOpened">reset</a><br>
+    Cartes en collection : <b id="ownedCount">0</b> (dont <b id="dupCount">0</b> en doublon) · <a href="#" id="resetOwned">vider</a><br>
+    Vendues : <b id="soldCount">0</b> · File de vente : <b id="queueCount">0</b> · <a href="#" id="clearQueue">vider</a>
+  </div>
+  <div id="logs" hidden>
+    <button class="sec back" id="closeLogs">← Retour</button>
+    <h1>📜 Logs</h1>
+    <div id="log">—</div>
+    <button class="sec" id="flushLogs">🗑 Vider les logs</button>
+    <div class="hint">Purge automatique des logs de plus de 7 jours.</div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
