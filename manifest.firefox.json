@@ -5,14 +5,15 @@
   "description": "Unofficial helper for wiki-masters.com: auto pack opening, collection tracking, marketplace filter, sales and auto-bidding.",
   "permissions": [
     "storage",
-    "alarms",
-    "declarativeContent"
+    "alarms"
   ],
   "host_permissions": [
     "https://*.wiki-masters.com/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "scripts": [
+      "background.js"
+    ]
   },
   "content_scripts": [
     {
@@ -42,5 +43,16 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "auto-pack-wikimasters@maximebranger.github.io",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
   }
 }
