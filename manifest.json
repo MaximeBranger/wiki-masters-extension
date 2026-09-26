@@ -5,7 +5,7 @@
   "description": "Ouverture auto des packs, récap des raretés, suivi de collection et vente des doublons sur wiki-masters.com",
   "permissions": ["storage", "alarms", "declarativeContent"],
   "host_permissions": ["https://*.wiki-masters.com/*"],
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "background.js", "scripts": ["background.js"] },
   "content_scripts": [
     {
       "matches": ["https://*.wiki-masters.com/*"],
@@ -13,5 +13,6 @@
       "run_at": "document_idle"
     }
   ],
-  "action": { "default_popup": "popup.html", "default_title": "Auto Pack (wiki-masters.com uniquement)" }
+  "action": { "default_popup": "popup.html", "default_title": "Auto Pack (wiki-masters.com uniquement)" },
+  "browser_specific_settings": { "gecko": { "id": "auto-pack-wikimasters@maximebranger.github.io", "strict_min_version": "121.0" } }
 }
