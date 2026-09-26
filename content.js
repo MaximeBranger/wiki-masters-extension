@@ -270,49 +270,65 @@ async function clickContinue() {
 }
 
 async function revealCards() {
-  if (revealing || !cfg.autoReveal) return;
+  const start = Date.now();
+  let lastAction = Date.now();
+  let steps = 0;
+  const packRarities = [];
+  while (Date.now() - start < 120000 && steps < 100) {
+    const btn = findNextButton();
+    if (btn && !btn.disabled) {
+      packRarities.push(await readCurrentRarity());    // carte affichée avant de passer à la suivante
+      btn.click();
+      steps++;
+      lastAction = Date.now();
+      await sleep(rand(cfg.revealMinDelay, cfg.revealMaxDelay));
+      continue;
+    }
+    if (btn && btn.disabled && steps > 0) break;       // dernière carte atteinte
+    if (Date.now() - lastAction > 6000) break;         // pas de carrousel
+    await sleep(300);
+  }
+  if (steps > 0) packRarities.push(await readCurrentRarity());   // dernière carte
+  else {
+    // Pas de carrousel : toutes les cartes sont visibles d'un coup
+    const all = freshCards();
+    packRarities.push(...(all.length ? all.map(c => c.r) : [await readCurrentRarity()]));
+  }
+  recordPack(packRarities);
+  log(`Défilement terminé : ${steps} carte(s) passée(s)`);
+  await clickContinue();
+}
+
+// ----- Limite quotidienne : « Limite quotidienne de paquets atteinte. Réessayez plus tard. » -----
+const LIMIT_PAUSE_MS = 30 * 60 * 1000;         // nouvel essai d'ouverture auto après 30 min
+let limitUntil = 0;
+function dailyLimitShown() {
+  return [...document.querySelectorAll("div, p, span")].some(el =>
+    !el.childElementCount && /limite quotidienne/i.test(el.textContent || "") && isShown(el));
+}
+
+// Ouverture d'un pack (auto ou manuelle) : comptée seulement si le site l'accepte
+async function openPack() {
   revealing = true;
   try {
-    const start = Date.now();
-    let lastAction = Date.now();
-    let steps = 0;
-    const packRarities = [];
     await sleep(1200);                                   // animation d'ouverture du pack
-    while (Date.now() - start < 120000 && steps < 100) {
-      const btn = findNextButton();
-      if (btn && !btn.disabled) {
-        packRarities.push(await readCurrentRarity());    // carte affichée avant de passer à la suivante
-        btn.click();
-        steps++;
-        lastAction = Date.now();
-        await sleep(rand(cfg.revealMinDelay, cfg.revealMaxDelay));
-        continue;
-      }
-      if (btn && btn.disabled && steps > 0) break;       // dernière carte atteinte
-      if (Date.now() - lastAction > 6000) break;         // pas de carrousel
-      await sleep(300);
+    if (dailyLimitShown()) {
+      limitUntil = Date.now() + LIMIT_PAUSE_MS;
+      log(`Limite quotidienne atteinte : pack non compté, ouverture auto en pause ${LIMIT_PAUSE_MS / 60000} min`);
+      return;
     }
-    if (steps > 0) packRarities.push(await readCurrentRarity());   // dernière carte
-    else {
-      // Pas de carrousel : toutes les cartes sont visibles d'un coup
-      const all = freshCards();
-      packRarities.push(...(all.length ? all.map(c => c.r) : [await readCurrentRarity()]));
-    }
-    recordPack(packRarities);
-    log(`Défilement terminé : ${steps} carte(s) passée(s)`);
-    await clickContinue();
+    cfg.opened = (cfg.opened || 0) + 1;
+    chrome.storage.local.set({ opened: cfg.opened });
+    if (cfg.autoReveal) await revealCards();
   } finally {
     revealing = false;
   }
 }
 
-// Ouverture d'un pack (auto ou manuelle) -> on lance le défilement
 document.addEventListener("click", e => {
-  if (!onPullsPage() || !matchesPackButton(e.target) || e.target.closest(OWN_UI)) return;
+  if (!onPullsPage() || !matchesPackButton(e.target) || e.target.closest(OWN_UI) || revealing) return;
   snapshotRarities();                        // avant que le site n'affiche les cartes
-  cfg.opened = (cfg.opened || 0) + 1;
-  chrome.storage.local.set({ opened: cfg.opened });
-  revealCards();
+  openPack();
 }, true);
 
 function findPackButtons() {
@@ -366,7 +382,7 @@ async function passHumanCheck(hc) {
 }
 
 async function tryOpen() {
-  if (!cfg.enabled || busy || revealing || !onPullsPage()) return;
+  if (!cfg.enabled || busy || revealing || !onPullsPage() || Date.now() < limitUntil) return;
   const hc = findHumanCheck();
   if (hc) {
     busy = true;

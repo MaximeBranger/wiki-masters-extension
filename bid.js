@@ -20,9 +20,9 @@
     try { chrome.runtime.sendMessage({ type: "log", ok, name: document.querySelector("main h1")?.textContent?.trim() || "Enchère", msg }); } catch {}
   };
 
-  // "1h 2m", "21m 03s", "2s" -> secondes ; NaN si terminée / illisible
+  // "1h 2m", "Se termine dans 21m 03s", "2s" -> secondes ; NaN si terminée / illisible
   function parseDuration(txt) {
-    if (!txt || /termin/i.test(txt)) return NaN;
+    if (!txt || (/termin/i.test(txt) && !/dans/i.test(txt))) return NaN;
     let s = 0, found = false;
     for (const [, n, u] of txt.matchAll(/(\d+)\s*([jdhms])/gi)) {
       found = true;
