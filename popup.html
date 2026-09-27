@@ -42,6 +42,9 @@
     <div class="toggle warn"><span>Mode simulation (ne valide pas)</span><input type="checkbox" id="dryRun"></div>
     <div class="toggle"><span>Vendre les doublons tirés</span><input type="checkbox" id="autoSellDupes"></div>
     <div class="toggle"><span>Remise en vente automatique</span><input type="checkbox" id="autoRelist"></div>
+    <div class="group">📊 Stats partagées</div>
+    <div class="hint" id="pseudoInfo"></div>
+    <button class="sec" id="syncNow">⇅ Synchroniser maintenant</button>
     <button class="sec" id="openLogs">📜 Logs</button>
     <button class="sec" id="openAdv">⚙ Configuration avancée</button>
   </div>
@@ -124,6 +127,15 @@
     <label>Bouton « récupérer » avant remise (optionnel)</label>
     <input type="text" id="reclaimButton" placeholder="ex : texte:récupérer,retirer">
     <button class="sec" id="relistNow">Vérifier maintenant</button>
+  </details>
+
+  <details>
+    <summary>📊 Synchro des stats</summary>
+    <label>URL de l'API</label>
+    <input type="text" id="statsApiUrl" placeholder="https://stats.example.com">
+    <label>Clé de synchro (la même sur chaque appareil)</label>
+    <input type="text" id="statsToken">
+    <div class="hint">Le premier envoi réserve le pseudo pour cette clé. Synchro automatique toutes les heures.</div>
   </details>
 
     <button id="save">Enregistrer</button>

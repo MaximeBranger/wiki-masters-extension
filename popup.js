@@ -11,12 +11,15 @@ const DEFAULTS = {
   qtySelector: "", keepMin: 1,
   autoRelist: false, salesPath: "/market/my-sales", relistMinutes: 30,
   expiredKeywords: "expirée,expiré,non vendue,expired", rowSelector: "", reclaimButton: "",
-  sellQueue: [], sellLog: [], soldCount: 0
+  sellQueue: [], sellLog: [], soldCount: 0,
+  statsApiUrl: "", statsToken: "", statsOutbox: [],
+  siteUsername: "", collectionScan: null
 };
 const CHECKS = ["enabled", "autoReveal", "autoContinue", "showSummary", "testHumanCheck", "markLinks", "affordableOnly", "readCollectionQty", "dryRun", "autoSellDupes", "autoRelist"];
 const NUMS = ["minDelay", "maxDelay", "revealMinDelay", "revealMaxDelay", "reloadMinutes", "pullWindow", "priceMultiplier", "minPrice", "keepMin", "budget", "relistMinutes"];
 const TEXTS = ["selector", "keywords", "nextButton", "continueButton", "rarityZone", "collectionPath", "cardPattern", "pullZone", "balanceSelector", "avgPrice", "sellButton",
-  "priceInput", "confirmButton", "qtySelector", "salesPath", "expiredKeywords", "rowSelector", "reclaimButton"];
+  "priceInput", "confirmButton", "qtySelector", "salesPath", "expiredKeywords", "rowSelector", "reclaimButton",
+  "statsApiUrl", "statsToken"];
 const $ = id => document.getElementById(id);
 
 function renderStats(c) {
@@ -25,6 +28,9 @@ function renderStats(c) {
   $("dupCount").textContent = Object.values(c.counts).filter(n => n >= 2).length;
   $("soldCount").textContent = c.soldCount;
   $("queueCount").textContent = c.sellQueue.length;
+  $("pseudoInfo").dataset.user = c.siteUsername;
+  $("pseudoInfo").textContent = c.siteUsername ? `Pseudo détecté : ${c.siteUsername}`
+    : "Pseudo non détecté : ouvrir wiki-masters.com en étant connecté.";
   $("log").textContent = c.sellLog.length ? c.sellLog.map(e => e.s ?? e).join("\n") : "Aucun log. (purge automatique après 7 jours)";
 }
 
@@ -58,6 +64,7 @@ $("save").addEventListener("click", () => {
   data.revealMaxDelay = Math.max(data.revealMinDelay, data.revealMaxDelay);
   data.relistMinutes = Math.max(5, data.relistMinutes);
   data.collectionPath ||= DEFAULTS.collectionPath;
+  if (!data.statsToken) delete data.statsToken;   // une clé vide ferait perdre le pseudo réservé
   chrome.storage.local.set(data, () => {
     $("save").textContent = "✓ Enregistré";
     setTimeout(() => $("save").textContent = "Enregistrer", 1200);
@@ -68,5 +75,10 @@ $("resetOpened").onclick = e => { e.preventDefault(); chrome.storage.local.set({
 $("resetOwned").onclick = e => { e.preventDefault(); if (confirm("Vider la collection mémorisée ?")) chrome.storage.local.set({ owned: [], counts: {} }); };
 $("flushLogs").onclick = () => chrome.storage.local.set({ sellLog: [] });
 $("clearQueue").onclick = e => { e.preventDefault(); chrome.storage.local.set({ sellQueue: [], sellCurrent: null }); };
+$("syncNow").onclick = () => {
+  chrome.runtime.sendMessage({ type: "stats-sync-now" });   // résultat détaillé dans les logs
+  $("syncNow").textContent = "⇅ Synchro lancée · voir les logs";
+  setTimeout(() => $("syncNow").textContent = "⇅ Synchroniser maintenant", 2500);
+};
 $("relistNow").onclick = () => { chrome.runtime.sendMessage({ type: "relist-now" }); $("relistNow").textContent = "Vérification lancée…"; };
 

@@ -83,6 +83,99 @@ async function openRelistCheck(force = false) {
   await chrome.tabs.create({ url: url.href, active: false });
 }
 
+// ===== Synchro des stats d'ouverture vers l'API =====
+// Chaque pack ouvert est journalisé avec un UUID (statsOutbox) et envoyé à l'API, qui ignore
+// les UUID déjà reçus : ni le reset du compteur local ni un renvoi ne créent de doublon.
+// Le journal n'est vidé qu'après confirmation du serveur.
+const SYNC_BATCH = 500;
+let outboxLock = Promise.resolve();
+const withOutbox = fn => (outboxLock = outboxLock.then(fn, fn));
+
+async function syncToken() {
+  const { statsToken = "" } = await S({ statsToken: "" });
+  if (statsToken) return statsToken;
+  const token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
+  await W({ statsToken: token });
+  return token;
+}
+
+const recordOpenedPack = pack => withOutbox(async () => {
+  const { statsOutbox = [] } = await S({ statsOutbox: [] });
+  if (!statsOutbox.some(p => p.id === pack.id)) await W({ statsOutbox: [...statsOutbox, pack] });
+});
+
+async function postApi(apiUrl, route, token, body) {
+  const res = await fetch(apiUrl.trim().replace(/\/+$/, "") + route, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Client-Token": token },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// Dernier scan complet de la collection : l'API remplace la collection précédente par celle-ci
+async function syncCollection(apiUrl, token, pseudo) {
+  const { collectionScan = null } = await S({ collectionScan: null });
+  if (!collectionScan) return null;
+  const body = await postApi(apiUrl, "/api/v1/collection", token,
+    { pseudo, scanned_at: collectionScan.scannedAt, cards: collectionScan.cards });
+  // Retire l'instantané envoyé, sauf si un nouveau scan l'a remplacé entre-temps
+  const { collectionScan: now = null } = await S({ collectionScan: null });
+  if (now?.scannedAt === collectionScan.scannedAt) await W({ collectionScan: null });
+  const text = body.stored ? `collection : ${body.cards} cartes` + (body.rejected ? ` (${body.rejected} rejetée(s))` : "")
+    : `collection ignorée (${body.reason})`;
+  return { text, stats: body.stats };
+}
+
+// Détail dans les logs : à chaque synchro manuelle, et pour une synchro auto qui envoie quelque chose ou échoue
+let syncing = false, syncAgain = false;
+async function syncStats(manual = false) {
+  const { siteUsername = "", statsApiUrl = "" } = await S({ siteUsername: "", statsApiUrl: "" });
+  const pseudo = siteUsername.trim();   // pseudo lu dans la session du site (account.js)
+  if (!pseudo || !statsApiUrl.trim()) {
+    if (manual) await addLog(false, "Synchro", !pseudo ? "pseudo non détecté (ouvrir wiki-masters.com connecté)" : "URL de l'API non renseignée");
+    return;
+  }
+  if (syncing) { syncAgain = true; return; }   // relancée à la fin de la synchro en cours
+  syncing = true;
+  const token = await syncToken();
+  let sent = 0, accepted = 0, duplicates = 0, rejected = 0, last = null;
+  try {
+    while (true) {
+      const { statsOutbox = [] } = await S({ statsOutbox: [] });
+      const batch = statsOutbox.slice(0, SYNC_BATCH);
+      const body = await postApi(statsApiUrl, "/api/v1/sync", token, { pseudo, packs: batch });
+      last = body.stats;
+      sent += batch.length;
+      accepted += body.accepted || 0;
+      duplicates += body.duplicates || 0;
+      rejected += body.rejected || 0;
+      const ids = new Set(batch.map(p => p.id));
+      await withOutbox(async () => {
+        const { statsOutbox: now = [] } = await S({ statsOutbox: [] });
+        await W({ statsOutbox: now.filter(p => !ids.has(p.id)) });
+      });
+      if (batch.length < SYNC_BATCH) break;
+    }
+    const col = await syncCollection(statsApiUrl, token, pseudo);
+    if (col?.stats) last = col.stats;   // stats à jour après l'envoi de la collection
+    if (manual || sent || col) {
+      const parts = [`${accepted} pack(s) enregistré(s)` +
+        (duplicates ? `, ${duplicates} déjà reçu(s)` : "") + (rejected ? `, ${rejected} rejeté(s)` : "")];
+      if (col) parts.push(col.text);
+      if (last) parts.push(`serveur : ${last.packs} packs, ${last.collection?.distinct ?? 0} cartes en collection`);
+      await addLog(true, `Synchro (${pseudo})`, parts.join(" · "));
+    }
+  } catch (e) {
+    await addLog(false, `Synchro (${pseudo})`, `échec : ${e.message || e}` + (sent ? ` (après ${sent} pack(s) envoyé(s))` : ""));
+  } finally {
+    syncing = false;
+    if (syncAgain) { syncAgain = false; syncStats(); }
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender) => {
   (async () => {
     if (msg.type === "log") return addLog(!!msg.ok, msg.name || "Enchère", msg.msg || "");
@@ -119,6 +212,8 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
       if (fresh.length) enqueue(fresh);
     }
 
+    if (msg.type === "pack-opened" && msg.pack?.id) return recordOpenedPack(msg.pack);
+    if (msg.type === "stats-sync-now") return syncStats(true);
     if (msg.type === "relist-now") openRelistCheck(true);
     if (msg.type === "process-now") processQueue();
   })();
@@ -128,6 +223,7 @@ async function setupAlarms() {
   const { autoRelist = false, relistMinutes = 30 } = await S({ autoRelist: false, relistMinutes: 30 });
   chrome.alarms.create("tick", { periodInMinutes: 1 });
   chrome.alarms.create("logs-prune", { periodInMinutes: 60, delayInMinutes: 1 });
+  chrome.alarms.create("stats-sync", { periodInMinutes: 60, delayInMinutes: 2 });
   await chrome.alarms.clear("relist");
   if (autoRelist) chrome.alarms.create("relist", { periodInMinutes: Math.max(5, relistMinutes), delayInMinutes: 1 });
 }
@@ -136,6 +232,7 @@ chrome.alarms.onAlarm.addListener(a => {
   if (a.name === "tick") processQueue();
   if (a.name === "logs-prune") pruneLogs();
   if (a.name === "relist") openRelistCheck();
+  if (a.name === "stats-sync") syncStats();
 });
 // L'icône (et la popup) ne sont actives que sur wiki-masters.com
 function setupActionRules() {
@@ -153,9 +250,10 @@ function setupActionRules() {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.remove(["rarityStats", "rarities", "raritySelector"]);   // ancienne option
+  chrome.storage.local.remove(["rarityStats", "rarities", "raritySelector", "statsPseudo", "statsLastSync"]);   // anciennes options
   setupActionRules();
   setupAlarms();
+  syncToken();
 });
 chrome.runtime.onStartup.addListener(setupAlarms);
 chrome.storage.onChanged.addListener(ch => {

@@ -9,7 +9,7 @@
   "content_scripts": [
     {
       "matches": ["https://*.wiki-masters.com/*"],
-      "js": ["content.js", "collection.js", "sell.js", "bid.js"],
+      "js": ["content.js", "collection.js", "sell.js", "bid.js", "account.js", "scan.js"],
       "run_at": "document_idle"
     }
   ],

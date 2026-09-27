@@ -17,7 +17,8 @@ const DEFAULTS = {
   testHumanCheck: false,                 // TEST dev : valider la modale « Vérification rapide »
   opened: 0,
   rarityCounts: {},                      // { C, PC, R, SR, UR, L, "?" }
-  lastPack: []
+  lastPack: [],
+  packLimitUntil: 0                      // limite quotidienne : pas d'ouverture auto avant cette date (ms)
 };
 
 let cfg = { ...DEFAULTS };
@@ -91,7 +92,7 @@ function parseRarityText(text) {
   return TIER_KEYS.includes(b) ? b : null;
 }
 
-const OWN_UI = "#wm-summary, #wm-pull-toast, #wm-owned-badge";
+const OWN_UI = "#wm-summary, #wm-limit, #wm-pull-toast, #wm-owned-badge";
 function rarityCandidates() {
   const out = [], seen = new Set();
   const push = (el, r) => {
@@ -185,6 +186,15 @@ summaryStyle.textContent = `
   #wm-summary .wm-pct { color: #777; font-size: 10px; min-width: 34px; text-align: right; }
   #wm-summary .wm-ft { margin-top: 6px; padding-top: 6px; border-top: 1px solid #3a3450; color: #999; font-size: 11px; }
   #wm-summary .wm-last { display: inline-flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+  #wm-limit { position: fixed; right: 20px; bottom: 20px; z-index: 2147483646; width: 230px; box-sizing: border-box;
+    display: flex; flex-direction: column; gap: 3px; padding: 9px 12px; border-radius: 12px;
+    background: #3b2a0a; color: #fde68a; border: 1px solid #92400e; font: 12px/1.4 system-ui, sans-serif;
+    box-shadow: 0 10px 28px rgba(0,0,0,.45); }
+  #wm-limit span:first-child { font-weight: 700; color: #fbbf24; }
+  #wm-limit b { color: #fff; font-variant-numeric: tabular-nums; }
+  #wm-limit button { align-self: flex-start; margin-top: 3px; padding: 3px 8px; border: 1px solid #92400e; border-radius: 6px;
+    background: transparent; color: #fde68a; font: 11px system-ui, sans-serif; cursor: pointer; }
+  #wm-limit button:hover { background: #92400e; color: #fff; }
   #wm-summary .wm-last span { padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 700; color: #fff; }
 `;
 document.documentElement.appendChild(summaryStyle);
@@ -221,15 +231,20 @@ function renderSummary() {
     (rc["?"] ? ` · ${rc["?"]} non identifiée(s)` : "") + `${last ? "<br>" + last : ""}</div></div>`;
 }
 let lastPath = "";
-setInterval(() => { if (location.pathname !== lastPath) { lastPath = location.pathname; renderSummary(); } }, 700);
+setInterval(() => { if (location.pathname !== lastPath) { lastPath = location.pathname; renderSummary(); renderLimit(); } }, 700);
 
 // ----- Bouton "carte suivante" (flèche droite du carrousel) -----
 const NEXT_POINTS = "9 18 15 12 9 6";
+// Chevron droit : ancienne icône (polyline), icône Lucide récente (path), ou libellé accessible
+function looksLikeNext(b) {
+  return !!b.querySelector(`polyline[points="${NEXT_POINTS}"], path[d="m9 18 6-6-6-6"], svg.lucide-chevron-right`)
+    || /^(suivant|carte suivante|next)$/i.test((b.getAttribute("aria-label") || "").trim());
+}
 function findNextButton() {
   let els = [];
   const sel = cfg.nextButton.trim();
   if (sel) { try { els = [...document.querySelectorAll(sel)]; } catch {} }
-  else els = [...document.querySelectorAll("button")].filter(b => b.querySelector(`polyline[points="${NEXT_POINTS}"]`));
+  else els = [...document.querySelectorAll("button")].filter(looksLikeNext);
   return els.find(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; }) || null;
 }
 function isNextButton(target) {
@@ -237,7 +252,7 @@ function isNextButton(target) {
   if (!b) return false;
   const sel = cfg.nextButton.trim();
   if (sel) { try { return b.matches(sel); } catch { return false; } }
-  return !!b.querySelector(`polyline[points="${NEXT_POINTS}"]`);
+  return looksLikeNext(b);
 }
 window.__wmIsNextButton = isNextButton;
 
@@ -297,11 +312,61 @@ async function revealCards() {
   recordPack(packRarities);
   log(`Défilement terminé : ${steps} carte(s) passée(s)`);
   await clickContinue();
+  return packRarities;
+}
+
+function newUuid() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;   // UUID v4
+  const h = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 // ----- Limite quotidienne : « Limite quotidienne de paquets atteinte. Réessayez plus tard. » -----
+// La date du prochain essai est enregistrée : elle survit à l'actualisation et vaut pour tous les onglets.
 const LIMIT_PAUSE_MS = 30 * 60 * 1000;         // nouvel essai d'ouverture auto après 30 min
-let limitUntil = 0;
+const limitActive = () => Date.now() < (cfg.packLimitUntil || 0);
+function setLimitPause(until) {
+  cfg.packLimitUntil = until;
+  chrome.storage.local.set({ packLimitUntil: until });
+  renderLimit();
+}
+
+function fmtDelay(ms) {
+  const t = Math.ceil(ms / 1000), h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = t % 60;
+  return h ? `${h} h ${String(m).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+// Compte à rebours au-dessus de l'encart récap
+let limitTimer = null;
+function renderLimit() {
+  let el = document.getElementById("wm-limit");
+  const until = cfg.packLimitUntil || 0;
+  if (until && Date.now() >= until) {        // pause écoulée : nouvel essai
+    cfg.packLimitUntil = 0;
+    chrome.storage.local.set({ packLimitUntil: 0 });
+    tryOpen();
+  }
+  if (!limitActive() || !onPullsPage()) {
+    el?.remove();
+    clearInterval(limitTimer); limitTimer = null;
+    return;
+  }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "wm-limit";
+    el.innerHTML = '<span>⏸ Limite quotidienne</span><span>Prochaine tentative dans <b></b></span><button type="button">Réessayer maintenant</button>';
+    el.querySelector("button").addEventListener("click", () => { setLimitPause(0); tryOpen(); });
+    document.body.appendChild(el);
+  }
+  const at = new Date(cfg.packLimitUntil).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  el.querySelector("b").textContent = `${fmtDelay(cfg.packLimitUntil - Date.now())} (à ${at})`;
+  const summary = document.getElementById("wm-summary");
+  el.style.bottom = `${summary ? summary.offsetHeight + 28 : 20}px`;
+  limitTimer ||= setInterval(renderLimit, 1000);
+}
+
 function dailyLimitShown() {
   return [...document.querySelectorAll("div, p, span")].some(el =>
     !el.childElementCount && /limite quotidienne/i.test(el.textContent || "") && isShown(el));
@@ -313,13 +378,22 @@ async function openPack() {
   try {
     await sleep(1200);                                   // animation d'ouverture du pack
     if (dailyLimitShown()) {
-      limitUntil = Date.now() + LIMIT_PAUSE_MS;
+      setLimitPause(Date.now() + LIMIT_PAUSE_MS);
       log(`Limite quotidienne atteinte : pack non compté, ouverture auto en pause ${LIMIT_PAUSE_MS / 60000} min`);
       return;
     }
     cfg.opened = (cfg.opened || 0) + 1;
     chrome.storage.local.set({ opened: cfg.opened });
-    if (cfg.autoReveal) await revealCards();
+    // Journal pour la synchro des stats : un UUID par pack, indépendant du compteur remis à zéro.
+    // Rien ici ne doit empêcher le défilement des cartes.
+    const t = Date.now();
+    let rarities = [];
+    try {
+      if (cfg.autoReveal) rarities = await revealCards();
+    } finally {
+      try { chrome.runtime.sendMessage({ type: "pack-opened", pack: { id: newUuid(), t, rarities } }); }
+      catch (e) { log("Pack non journalisé pour la synchro :", e); }
+    }
   } finally {
     revealing = false;
   }
@@ -382,7 +456,7 @@ async function passHumanCheck(hc) {
 }
 
 async function tryOpen() {
-  if (!cfg.enabled || busy || revealing || !onPullsPage() || Date.now() < limitUntil) return;
+  if (!cfg.enabled || busy || revealing || !onPullsPage() || limitActive()) return;
   const hc = findHumanCheck();
   if (hc) {
     busy = true;
@@ -432,6 +506,7 @@ chrome.storage.local.get(DEFAULTS, stored => {
   cfg = { ...DEFAULTS, ...stored };
   log("Chargé. Actif :", cfg.enabled);
   renderSummary();
+  renderLimit();
   setupReload();
   tryOpen();
 });
@@ -439,6 +514,7 @@ chrome.storage.local.get(DEFAULTS, stored => {
 chrome.storage.onChanged.addListener(changes => {
   for (const [k, { newValue }] of Object.entries(changes)) cfg[k] = newValue;
   if (["opened", "rarityCounts", "lastPack", "showSummary"].some(k => k in changes)) renderSummary();
+  if ("packLimitUntil" in changes || "showSummary" in changes) renderLimit();
   setupReload();
   tryOpen();
 });
