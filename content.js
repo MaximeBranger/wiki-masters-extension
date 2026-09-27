@@ -140,11 +140,27 @@ function isShown(el) {
 const freshCards = () => rarityCandidates().filter(c => raritySnapshot.get(c.el) !== c.text && isShown(c.el));
 
 // Carte affichée au centre du carrousel
-function currentCardRarity() {
+function currentCard() {
   const cs = freshCards();
   if (!cs.length) return null;
   const d = c => { const r = c.el.getBoundingClientRect(); return Math.hypot(r.left + r.width / 2 - innerWidth / 2, r.top + r.height / 2 - innerHeight / 2); };
-  return cs.sort((a, b) => d(a) - d(b))[0].r;
+  return cs.sort((a, b) => d(a) - d(b))[0];
+}
+const currentCardRarity = () => currentCard()?.r || null;
+
+// Première carte : attend la fin de l'animation d'ouverture (carte immobile pendant SETTLE_MS)
+const SETTLE_MS = 600, SETTLE_MAX_MS = 5000;
+async function waitCardSettled() {
+  const end = Date.now() + SETTLE_MAX_MS;
+  let last = "", since = Date.now();
+  while (Date.now() < end) {
+    const c = currentCard();
+    const r = c?.el.getBoundingClientRect();
+    const key = r ? `${c.r}|${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)}` : "";
+    if (key !== last) { last = key; since = Date.now(); }
+    else if (key && Date.now() - since >= SETTLE_MS) return;
+    await sleep(100);
+  }
 }
 // Attend que la rareté de la carte affichée soit lisible avant de poursuivre
 const RARITY_WAIT_MS = 10000;
@@ -292,6 +308,10 @@ async function revealCards() {
   while (Date.now() - start < 120000 && steps < 100) {
     const btn = findNextButton();
     if (btn && !btn.disabled) {
+      if (steps === 0) {                                // 1re carte : laisser finir l'animation, puis la montrer
+        await waitCardSettled();
+        await sleep(rand(cfg.revealMinDelay, cfg.revealMaxDelay));
+      }
       packRarities.push(await readCurrentRarity());    // carte affichée avant de passer à la suivante
       btn.click();
       steps++;
