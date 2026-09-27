@@ -3,6 +3,7 @@
 // 2. Ouverture de pack : ajoute les cartes tirées, compte les doublons.
 // 3. Page de carte : badge possédée / doublon / pas encore.
 // 4. Partout : pastilles ✓ / ✕ / ★ nouvelle / ×N doublon sur les liens de cartes.
+// 5. Page d'une annonce du marché : gros tag « Déjà possédée ».
 (() => {
   const CDEF = {
     collectionPath: "/collection",
@@ -16,7 +17,8 @@
     autoSellDupes: false,
     readCollectionQty: true,   // lire "x3" / "×3" à côté des cartes sur la page collection
     owned: [],
-    counts: {}                 // id -> nombre d'exemplaires
+    counts: {},                // id -> nombre d'exemplaires
+    listingOwned: {}           // id d'annonce du marché -> 1 si le site l'a marquée « Dans ta collection », 0 sinon
   };
   let c = { ...CDEF };
   let owned = new Set();
@@ -94,6 +96,14 @@
     #wm-pull-toast b { color: #fbbf24; }
     #wm-pull-toast .dup { color: #c4b5fd; }
     #wm-pull-toast ul { margin: 6px 0 0; padding-left: 18px; }
+    #wm-listing-owned { pointer-events: none; z-index: 40; display: grid; place-items: center; }
+    #wm-listing-owned.wm-on-card { position: absolute; inset: 0; background: rgba(5,150,105,.35); }
+    #wm-listing-owned.wm-float { position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 2147483647; }
+    #wm-listing-owned span { padding: 8px 14px; border: 3px solid #fff; border-radius: 12px; background: #059669;
+      color: #fff; font: 900 20px/1.15 system-ui, sans-serif; letter-spacing: .5px; text-align: center;
+      box-shadow: 0 8px 24px rgba(0,0,0,.5); box-sizing: border-box; }
+    #wm-listing-owned.wm-on-card span { max-width: 85%; transform: rotate(-12deg); }
+    #wm-listing-owned.wm-float span { white-space: nowrap; }
   `;
   document.documentElement.appendChild(style);
 
@@ -221,6 +231,7 @@
     for (const a of document.querySelectorAll("a[href]")) {
       a.classList.remove("wm-mark", "wm-yes", "wm-no", "wm-new", "wm-dup", "wm-site-owned");
       a.removeAttribute("data-wm-count");
+      rememberListing(a);
       // Marketplace : les liens pointent vers une annonce (pas un id de carte), mais le site
       // affiche déjà son propre tag « Possédée » -> on s'appuie dessus.
       if (c.markLinks && !inCollection && a.querySelector('[title="Dans ta collection"]')) {
@@ -236,7 +247,53 @@
     }
   }
 
-  // --- 5. Marketplace : n'afficher que les offres dans mes moyens ---
+  // --- 5. Annonce du marché : la page ne donne pas l'id de la carte, on retient le tag
+  //        « Dans ta collection » vu sur chaque annonce dans la grille du marché ---
+  const LISTING_RE = /^\/marketplace\/([^/?#]+)\/?$/;
+  const listingIdFrom = href => {
+    try { return (new URL(href, location.origin).pathname.match(LISTING_RE) || [])[1] || null; } catch { return null; }
+  };
+  let listingSaveTimer;
+  function rememberListing(a) {
+    if (!/^\/marketplace\/?$/.test(location.pathname)) return;
+    const id = listingIdFrom(a.href);
+    if (!id) return;
+    const v = a.querySelector('[title="Dans ta collection"]') ? 1 : 0;
+    if (c.listingOwned[id] === v) return;
+    c.listingOwned = { ...c.listingOwned, [id]: v };
+    clearTimeout(listingSaveTimer);
+    listingSaveTimer = setTimeout(() => {
+      const keys = Object.keys(c.listingOwned);
+      if (keys.length > 2000) for (const k of keys.slice(0, keys.length - 2000)) delete c.listingOwned[k];
+      chrome.storage.local.set({ listingOwned: c.listingOwned });
+    }, 400);
+  }
+  // Nombre d'exemplaires possédés de la carte de l'annonce (null = inconnu)
+  function listingOwnership(id) {
+    const main = document.querySelector("main");
+    if (main?.querySelector('[title="Dans ta collection"]')) return 1;
+    for (const a of main?.querySelectorAll("a[href]") || []) {
+      const cid = cardIdFrom(a.href);
+      if (cid && owned.size) return countOf(cid);
+    }
+    return id in c.listingOwned ? c.listingOwned[id] : null;
+  }
+  function updateListingTag() {
+    let tag = document.getElementById("wm-listing-owned");
+    const id = listingIdFrom(location.href);
+    const n = id ? listingOwnership(id) : null;
+    if (!n) { tag?.remove(); return; }
+    if (!tag) { tag = document.createElement("div"); tag.id = "wm-listing-owned"; tag.appendChild(document.createElement("span")); }
+    const txt = n >= 2 ? `✓ DÉJÀ POSSÉDÉE ×${n}` : "✓ DÉJÀ POSSÉDÉE";
+    if (tag.firstChild.textContent !== txt) tag.firstChild.textContent = txt;
+    // Sur l'illustration de la carte si on la trouve, sinon en haut de l'écran
+    const card = document.querySelector("main h3")?.closest(".rounded-2xl.overflow-hidden");
+    const host = card || document.body;
+    tag.className = card ? "wm-on-card" : "wm-float";
+    if (tag.parentElement !== host) host.appendChild(tag);
+  }
+
+  // --- 6. Marketplace : n'afficher que les offres dans mes moyens ---
   const toNum = txt => {
     const m = String(txt || "").replace(/[\s  ]/g, "").match(/\d+(?:[.,]\d+)?/);
     return m ? parseFloat(m[0].replace(",", ".")) : NaN;
@@ -309,6 +366,7 @@
     scanPulls();
     updateBadge();
     markLinks();
+    updateListingTag();
     filterAffordable();
     ensureSwitch();
   }
