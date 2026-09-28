@@ -9,7 +9,7 @@ const DEFAULTS = {
   avgPrice: "texte:prix moyen,moyenne,average", sellButton: "texte:vendre,mettre en vente,sell",
   priceInput: "input[type=number]", confirmButton: "texte:confirmer,valider,mettre en vente,confirm",
   qtySelector: "", keepMin: 1,
-  autoRelist: false, salesPath: "/market/my-sales", relistMinutes: 30,
+  autoRelist: false, salesPath: "/marketplace", salesTabButton: "texte:mes ventes", relistMinutes: 30,
   expiredKeywords: "expirée,expiré,non vendue,expired", rowSelector: "", reclaimButton: "",
   sellQueue: [], sellLog: [], soldCount: 0,
   statsApiUrl: "", statsToken: "", statsOutbox: [],
@@ -18,7 +18,7 @@ const DEFAULTS = {
 const CHECKS = ["enabled", "autoReveal", "autoContinue", "showSummary", "testHumanCheck", "markLinks", "affordableOnly", "readCollectionQty", "dryRun", "autoSellDupes", "autoRelist"];
 const NUMS = ["minDelay", "maxDelay", "revealMinDelay", "revealMaxDelay", "reloadMinutes", "pullWindow", "priceMultiplier", "minPrice", "keepMin", "budget", "relistMinutes"];
 const TEXTS = ["selector", "keywords", "nextButton", "continueButton", "rarityZone", "collectionPath", "cardPattern", "pullZone", "balanceSelector", "avgPrice", "sellButton",
-  "priceInput", "confirmButton", "qtySelector", "salesPath", "expiredKeywords", "rowSelector", "reclaimButton",
+  "priceInput", "confirmButton", "qtySelector", "salesPath", "salesTabButton", "expiredKeywords", "rowSelector", "reclaimButton",
   "statsApiUrl", "statsToken"];
 const $ = id => document.getElementById(id);
 

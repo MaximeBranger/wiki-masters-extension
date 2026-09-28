@@ -18,6 +18,7 @@
     expiredKeywords: "expirée,expiré,non vendue,expired",
     rowSelector: "",
     reclaimButton: "",
+    salesTabButton: "texte:mes ventes",
     cardPattern: "/cards?/([^/?#]+)"
   };
   let c;
@@ -141,7 +142,11 @@
 
   // ---------- Détection des ventes expirées ----------
   async function relist() {
-    await sleep(3500);
+    await sleep(2000);
+    if (c.salesTabButton.trim()) {
+      const tabBtn = await waitFor(() => find(c.salesTabButton), 6000);
+      if (tabBtn) { tabBtn.click(); await sleep(1500); }
+    }
     const words = c.expiredKeywords.split(",").map(w => w.trim().toLowerCase()).filter(Boolean);
     const rowSel = c.rowSelector.trim() ||
       "tr, li, article, [class*='row'], [class*='item'], [class*='listing'], [class*='card']";

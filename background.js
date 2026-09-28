@@ -75,7 +75,7 @@ async function processQueue() {
 }
 
 async function openRelistCheck(force = false) {
-  const { salesPath = "/market/my-sales", autoRelist = false } = await S({ salesPath: "/market/my-sales", autoRelist: false });
+  const { salesPath = "/marketplace", autoRelist = false } = await S({ salesPath: "/marketplace", autoRelist: false });
   if (!autoRelist && !force) return;
   await addLog(true, "Ventes expirées", "onglet de vérification ouvert");
   const url = new URL(salesPath, ORIGIN);
@@ -249,8 +249,12 @@ function setupActionRules() {
   });
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   chrome.storage.local.remove(["rarityStats", "rarities", "raritySelector", "statsPseudo", "statsLastSync"]);   // anciennes options
+  // L'ancien chemin par défaut "/market/my-sales" n'existe pas sur le site (404) ; "mes ventes" est
+  // en fait un onglet de /marketplace. Corrige les installations qui ont enregistré l'ancienne valeur.
+  const { salesPath } = await S({ salesPath: "" });
+  if (salesPath === "/market/my-sales") await W({ salesPath: "/marketplace" });
   setupActionRules();
   setupAlarms();
   syncToken();
