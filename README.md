@@ -10,7 +10,7 @@ Extension de navigateur (Manifest V3) pour [wiki-masters.com](https://www.wiki-m
 - renchère automatique au palier minimum, jusqu'à un plafond ;
 - synchro des stats d'ouverture (packs et raretés) et de la collection vers l'API [`wiki-masters-extension-api`](../wiki-masters-extension-api), avec le pseudo lu dans la session du site.
 
-La vente et la renchère démarrent en **mode simulation** : rien n'est validé tant que ce mode n'est pas désactivé dans la popup.
+La vente démarre en **mode simulation** : rien n'est validé tant que ce mode n'est pas désactivé dans la popup. La renchère envoie de vraies mises dès son activation.
 
 ## Installation en mode développeur
 

@@ -1,16 +1,19 @@
 // ===== Wiki-Masters Auto Pack - renchère automatique =====
 // Sur la page d'une enchère (/marketplace/<id>) : plafond de mise + renchère auto au minimum requis.
-// Nécessite que l'onglet reste ouvert. Mode simulation activé par défaut (ne clique pas sur « Miser »).
+// Nécessite que l'onglet reste ouvert. Les mises sont réelles dès l'activation.
 (() => {
   const ID_RE = /^\/marketplace\/([^/?#]+)\/?$/;
   const CHECK_MS = 1500;
   const VERIFY_MS = 8000;      // délai pour constater qu'une mise a bien été prise en compte
   const STALE_RELOAD_MS = 30000;
   const MAX_FAILS = 3;
+  const ENDED_CONFIRM_MS = 5000; // la fin doit être constatée pendant 5 s avant d'arrêter la renchère
+  const ENDED_KEEP_MS = 7 * 24 * 3600_000;   // réglages des enchères terminées gardés 7 jours
 
   let bids = {};               // id -> { max, on, last, at, fails }
-  let opts = { bidDryRun: true, bidSnipe: 0 };
+  let opts = { bidSnipe: 0 };
   let lastCur = null, lastChange = Date.now();
+  let endedSince = 0;
   let status = "";
 
   const toNum = t => { const m = String(t || "").replace(/[\s  ]/g, "").match(/\d+/); return m ? parseInt(m[0], 10) : NaN; };
@@ -20,9 +23,9 @@
     try { chrome.runtime.sendMessage({ type: "log", ok, name: document.querySelector("main h1")?.textContent?.trim() || "Enchère", msg }); } catch {}
   };
 
-  // "1h 2m", "Se termine dans 21m 03s", "2s" -> secondes ; NaN si terminée / illisible
+  // "1h 2m", "Se termine dans 21m 03s", "2s" -> secondes ; NaN si illisible
   function parseDuration(txt) {
-    if (!txt || (/termin/i.test(txt) && !/dans/i.test(txt))) return NaN;
+    if (!txt) return NaN;
     let s = 0, found = false;
     for (const [, n, u] of txt.matchAll(/(\d+)\s*([jdhms])/gi)) {
       found = true;
@@ -42,9 +45,14 @@
     const timeEl = byLabel(/temps restant/i)?.parentElement?.querySelector("span.tabular-nums");
     const input = main.querySelector('input[aria-label="Montant de la mise"]');
     const button = [...main.querySelectorAll("button")].find(b => b.textContent.trim() === "Miser");
+    // Fin explicite : « Terminée » à la place du temps restant, ou message de fin dans la page
+    const timeTxt = timeEl?.textContent || "";
+    const ended = (/termin/i.test(timeTxt) && !/dans/i.test(timeTxt)) ||
+      [...main.querySelectorAll("p, span, div, h2, h3")].some(el => !el.childElementCount &&
+        /^(cette |l'|l’)?(enchère|vente) (est )?(terminée|clôturée|expirée)|^enchère terminée|a pris fin/i.test(el.textContent.trim()));
     return {
       cur, min: toNum(minEl?.textContent), bal: toNum(balEl?.firstElementChild?.textContent),
-      timeTxt: timeEl?.textContent || "", input, button
+      timeTxt, ended, input, button
     };
   }
 
@@ -61,14 +69,24 @@
     ensurePanel(id);
     if (!id) return;
     const a = bids[id];
-    if (!a || !a.on) { setStatus(a?.max ? "Renchère désactivée" : ""); return; }
+    if (!a || !a.on) { setStatus(a?.endedAt ? "Enchère terminée" : a?.max ? "Renchère désactivée" : ""); return; }
 
     const p = readPage();
     if (!p || isNaN(p.cur)) return;
     if (p.cur !== lastCur) { lastCur = p.cur; lastChange = Date.now(); }
 
+    // Page pas encore chargée (après une actualisation) : on attend, sans rien désactiver
     const left = parseDuration(p.timeTxt);
-    if (isNaN(left)) { setStatus("Enchère terminée"); a.on = false; save(); log(true, `renchère arrêtée : enchère terminée (mise finale ${p.cur})`); return; }
+    if (p.ended) {
+      endedSince ||= Date.now();
+      if (Date.now() - endedSince < ENDED_CONFIRM_MS) { setStatus("Fin d'enchère détectée, vérification…"); return; }
+      a.on = false; a.endedAt = Date.now(); save();
+      setStatus("Enchère terminée");
+      log(true, `renchère arrêtée : enchère terminée (mise finale ${p.cur})`);
+      return;
+    }
+    endedSince = 0;
+    if (isNaN(left)) { setStatus(`Renchère active (max ${a.max}) · lecture du temps restant…`); return; }
 
     // Ma mise a-t-elle été prise en compte ?
     if (a.last) {
@@ -77,6 +95,10 @@
         a.fails = (a.fails || 0) + 1; a.last = 0;
         if (a.fails >= MAX_FAILS) { a.on = false; save(); setStatus("Échec de mise, arrêt"); log(false, `renchère arrêtée : ${MAX_FAILS} mises non prises en compte`); return; }
         save();
+      } else {
+        // Mise envoyée pas encore visible : on attend, sans renvoyer la même mise
+        setStatus(`Mise de ${a.last} envoyée, en attente de confirmation…`);
+        return;
       }
     }
     if (a.last && p.cur === a.last) { setStatus(`Je mène à ${p.cur}`); staleReload(left); return; }
@@ -90,19 +112,10 @@
     if (!p.input || !p.button || p.button.disabled) return;
 
     a.at = Date.now();
-    if (opts.bidDryRun) {
-      a.last = 0;
-      setStatus(`Simulation : miserait ${next}`);
-      if (a.simFor !== p.cur) {   // une seule ligne de log par état de l'enchère
-        a.simFor = p.cur;
-        log(true, `simulation : aurait misé ${next} (max ${a.max}, actuelle ${p.cur})`);
-      }
-    } else {
-      a.last = next;
-      placeBid(p, next);
-      setStatus(`Mise de ${next} envoyée`);
-      log(true, `mise de ${next} envoyée (max ${a.max}, actuelle ${p.cur})`);
-    }
+    a.last = next;
+    placeBid(p, next);
+    setStatus(`Mise de ${next} envoyée`);
+    log(true, `mise de ${next} envoyée (max ${a.max}, actuelle ${p.cur})`);
     save();
   }
 
@@ -121,7 +134,6 @@
     #wm-bid label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
     #wm-bid input[type=number] { width: 70px; padding: 3px 6px; border-radius: 6px; border: 1px solid #3a3450; background: #16131f; color: #fff; }
     #wm-bid .st { margin-top: 8px; color: #c4b5fd; min-height: 1.4em; }
-    #wm-bid.wm-real { border-left-color: #dc2626; }
   `;
   document.documentElement.appendChild(style);
 
@@ -135,7 +147,6 @@
         <label>Mise max <input type="number" min="1" id="wm-bid-max"></label>
         <label>Miser à T-… s (0 = direct) <input type="number" min="0" id="wm-bid-snipe"></label>
         <label><span>Activer</span><input type="checkbox" id="wm-bid-on"></label>
-        <label><span>Simulation</span><input type="checkbox" id="wm-bid-dry"></label>
         <div class="st" id="wm-bid-st"></div>`;
       document.body.appendChild(el);
       const $ = s => el.querySelector(s);
@@ -150,13 +161,8 @@
       $("#wm-bid-on").addEventListener("change", e => {
         const cur = bids[listingId()] ||= {};
         if (e.target.checked && !(cur.max > 0)) { e.target.checked = false; setStatus("Renseigne d'abord une mise max"); return; }
-        cur.on = e.target.checked; cur.fails = 0; cur.last = 0; save();
-        log(true, cur.on ? `renchère activée, max ${cur.max}${opts.bidDryRun ? " (simulation)" : ""}` : "renchère désactivée");
-      });
-      $("#wm-bid-dry").addEventListener("change", e => {
-        if (!e.target.checked && !confirm("Désactiver la simulation ? Les mises seront réellement envoyées (wikibidous débités).")) { e.target.checked = true; return; }
-        opts.bidDryRun = e.target.checked;
-        chrome.storage.local.set({ bidDryRun: opts.bidDryRun });
+        cur.on = e.target.checked; cur.fails = 0; cur.last = 0; delete cur.endedAt; save();
+        log(true, cur.on ? `renchère activée, max ${cur.max}` : "renchère désactivée");
       });
     }
     const a = bids[id] || {};
@@ -164,8 +170,6 @@
     set("#wm-bid-max", n => n.value = a.max || "");
     set("#wm-bid-snipe", n => n.value = opts.bidSnipe);
     set("#wm-bid-on", n => n.checked = !!a.on);
-    set("#wm-bid-dry", n => n.checked = !!opts.bidDryRun);
-    el.classList.toggle("wm-real", !opts.bidDryRun);
   }
   function setStatus(s) {
     if (s === status) return;
@@ -174,10 +178,21 @@
     if (n) n.textContent = s;
   }
 
-  chrome.storage.local.get({ autoBids: {}, bidDryRun: true, bidSnipe: 0 }, s => {
+  chrome.storage.local.remove("bidDryRun");   // ancienne option (mode simulation retiré)
+  chrome.storage.local.get({ autoBids: {}, bidSnipe: 0 }, s => {
     bids = s.autoBids || {};
-    opts = { bidDryRun: s.bidDryRun, bidSnipe: s.bidSnipe };
+    // Purge des enchères terminées depuis plus de 7 jours
+    const now = Date.now();
+    const kept = Object.fromEntries(Object.entries(bids).filter(([, b]) => !(b.endedAt && now - b.endedAt > ENDED_KEEP_MS)));
+    if (Object.keys(kept).length !== Object.keys(bids).length) { bids = kept; save(); }
+    opts = { bidSnipe: s.bidSnipe };
     setInterval(tick, CHECK_MS);
     tick();
+  });
+
+  // Réglages modifiés dans un autre onglet (ou par la popup) : on les reprend
+  chrome.storage.onChanged.addListener(ch => {
+    if (ch.autoBids) bids = ch.autoBids.newValue || {};
+    if (ch.bidSnipe) opts.bidSnipe = ch.bidSnipe.newValue;
   });
 })();
